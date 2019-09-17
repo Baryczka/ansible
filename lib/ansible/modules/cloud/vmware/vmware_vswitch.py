@@ -38,60 +38,65 @@ options:
     - Alias C(switch) is added in version 2.4.
     required: yes
     aliases: [ switch_name ]
+    type: str
   nics:
     description:
     - A list of vmnic names or vmnic name to attach to vSwitch.
     - Alias C(nics) is added in version 2.4.
     aliases: [ nic_name ]
     default: []
+    type: list
   number_of_ports:
     description:
     - Number of port to configure on vSwitch.
     default: 128
+    type: int
   mtu:
     description:
     - MTU to configure on vSwitch.
     default: 1500
+    type: int
   state:
     description:
     - Add or remove the switch.
     default: present
     choices: [ absent, present ]
+    type: str
   esxi_hostname:
     description:
     - Manage the vSwitch using this ESXi host system.
     version_added: "2.5"
     aliases: [ 'host' ]
+    type: str
 extends_documentation_fragment:
 - vmware.documentation
 '''
 
 EXAMPLES = '''
 - name: Add a VMware vSwitch
-  action:
-    module: vmware_vswitch
-    hostname: esxi_hostname
-    username: esxi_username
-    password: esxi_password
+  vmware_vswitch:
+    hostname: '{{ esxi_hostname }}'
+    username: '{{ esxi_username }}'
+    password: '{{ esxi_password }}'
     switch: vswitch_name
     nics: vmnic_name
     mtu: 9000
   delegate_to: localhost
 
-- name: Add a VMWare vSwitch without any physical NIC attached
+- name: Add a VMware vSwitch without any physical NIC attached
   vmware_vswitch:
-    hostname: 192.168.10.1
-    username: admin
-    password: password123
+    hostname: '{{ esxi_hostname }}'
+    username: '{{ esxi_username }}'
+    password: '{{ esxi_password }}'
     switch: vswitch_0001
     mtu: 9000
   delegate_to: localhost
 
-- name: Add a VMWare vSwitch with multiple NICs
+- name: Add a VMware vSwitch with multiple NICs
   vmware_vswitch:
-    hostname: esxi_hostname
-    username: esxi_username
-    password: esxi_password
+    hostname: '{{ esxi_hostname }}'
+    username: '{{ esxi_username }}'
+    password: '{{ esxi_password }}'
     switch: vmware_vswitch_0004
     nics:
     - vmnic1
@@ -101,9 +106,9 @@ EXAMPLES = '''
 
 - name: Add a VMware vSwitch to a specific host system
   vmware_vswitch:
-    hostname: 192.168.10.1
-    username: esxi_username
-    password: esxi_password
+    hostname: '{{ esxi_hostname }}'
+    username: '{{ esxi_username }}'
+    password: '{{ esxi_password }}'
     esxi_hostname: DC0_H0
     switch_name: vswitch_001
     nic_name: vmnic0
@@ -115,7 +120,7 @@ RETURN = """
 result:
     description: information about performed operation
     returned: always
-    type: string
+    type: str
     sample: "vSwitch 'vSwitch_1002' is created successfully"
 """
 
@@ -309,16 +314,11 @@ class VMwareHostVirtualSwitch(PyVmomi):
                 vswitch_pnic_info['num_ports'] != self.number_of_ports:
             diff = True
 
-        if not all_nics:
-            diff = False
-            results['result'] += " as no NICs provided / found which are required while updating vSwitch."
-
         try:
             if diff:
-                # vSwitch needs every parameter again while updating,
-                # even if we are updating any one of them
                 vss_spec = vim.host.VirtualSwitch.Specification()
-                vss_spec.bridge = vim.host.VirtualSwitch.BondBridge(nicDevice=all_nics)
+                if all_nics:
+                    vss_spec.bridge = vim.host.VirtualSwitch.BondBridge(nicDevice=all_nics)
                 vss_spec.numPorts = self.number_of_ports
                 vss_spec.mtu = self.mtu
 

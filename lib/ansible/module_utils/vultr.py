@@ -7,6 +7,7 @@ __metaclass__ = type
 
 import os
 import time
+import random
 import urllib
 from ansible.module_utils.six.moves import configparser
 from ansible.module_utils._text import to_text, to_native
@@ -14,22 +15,28 @@ from ansible.module_utils.urls import fetch_url
 
 
 VULTR_API_ENDPOINT = "https://api.vultr.com"
+VULTR_USER_AGENT = 'Ansible Vultr'
 
 
 def vultr_argument_spec():
     return dict(
-        api_key=dict(default=os.environ.get('VULTR_API_KEY'), no_log=True),
+        api_key=dict(type='str', default=os.environ.get('VULTR_API_KEY'), no_log=True),
         api_timeout=dict(type='int', default=os.environ.get('VULTR_API_TIMEOUT')),
         api_retries=dict(type='int', default=os.environ.get('VULTR_API_RETRIES')),
-        api_account=dict(default=os.environ.get('VULTR_API_ACCOUNT') or 'default'),
-        api_endpoint=dict(default=os.environ.get('VULTR_API_ENDPOINT')),
-        validate_certs=dict(default=True, type='bool'),
+        api_retry_max_delay=dict(type='int', default=os.environ.get('VULTR_API_RETRY_MAX_DELAY')),
+        api_account=dict(type='str', default=os.environ.get('VULTR_API_ACCOUNT') or 'default'),
+        api_endpoint=dict(type='str', default=os.environ.get('VULTR_API_ENDPOINT')),
+        validate_certs=dict(type='bool', default=True),
     )
 
 
 class Vultr:
 
     def __init__(self, module, namespace):
+
+        if module._name.startswith('vr_'):
+            module.deprecate("The Vultr modules were renamed. The prefix of the modules changed from vr_ to vultr_", version='2.11')
+
         self.module = module
 
         # Namespace use for returns
@@ -45,7 +52,7 @@ class Vultr:
 
         try:
             config = self.read_env_variables()
-            config.update(self.read_ini_config())
+            config.update(Vultr.read_ini_config(self.module.params.get('api_account')))
         except KeyError:
             config = {}
 
@@ -54,6 +61,7 @@ class Vultr:
                 'api_key': self.module.params.get('api_key') or config.get('key'),
                 'api_timeout': self.module.params.get('api_timeout') or int(config.get('timeout') or 60),
                 'api_retries': self.module.params.get('api_retries') or int(config.get('retries') or 5),
+                'api_retry_max_delay': self.module.params.get('api_retries') or int(config.get('retry_max_delay') or 12),
                 'api_endpoint': self.module.params.get('api_endpoint') or config.get('endpoint') or VULTR_API_ENDPOINT,
             }
         except ValueError as e:
@@ -69,18 +77,19 @@ class Vultr:
             'api_account': self.module.params.get('api_account'),
             'api_timeout': self.api_config['api_timeout'],
             'api_retries': self.api_config['api_retries'],
+            'api_retry_max_delay': self.api_config['api_retry_max_delay'],
             'api_endpoint': self.api_config['api_endpoint'],
         }
 
         # Headers to be passed to the API
         self.headers = {
             'API-Key': "%s" % self.api_config['api_key'],
-            'User-Agent': "Ansible Vultr",
+            'User-Agent': VULTR_USER_AGENT,
             'Accept': 'application/json',
         }
 
     def read_env_variables(self):
-        keys = ['key', 'timeout', 'retries', 'endpoint']
+        keys = ['key', 'timeout', 'retries', 'retry_max_delay', 'endpoint']
         env_conf = {}
         for key in keys:
             if 'VULTR_API_%s' % key.upper() not in os.environ:
@@ -89,9 +98,8 @@ class Vultr:
 
         return env_conf
 
-    def read_ini_config(self):
-        ini_group = self.module.params.get('api_account')
-
+    @staticmethod
+    def read_ini_config(ini_group):
         paths = (
             os.path.join(os.path.expanduser('~'), '.vultr.ini'),
             os.path.join(os.getcwd(), 'vultr.ini'),
@@ -124,15 +132,15 @@ class Vultr:
             return
 
         r_value = resource.get(resource_key)
-        if isinstance(param, bool):
-            if param is True and r_value not in ['yes', 'enable']:
+        if r_value in ['yes', 'no']:
+            if param and r_value != 'yes':
                 return "enable"
-            elif param is False and r_value not in ['no', 'disable']:
+            elif not param and r_value != 'no':
                 return "disable"
         else:
-            if r_value is None:
+            if param and not r_value:
                 return "enable"
-            else:
+            elif not param and r_value:
                 return "disable"
 
     def api_query(self, path="/", method="GET", data=None):
@@ -155,7 +163,10 @@ class Vultr:
             except AttributeError:
                 data = urllib.parse.urlencode(data_encoded) + data_list
 
-        for s in range(0, self.api_config['api_retries']):
+        retry_max_delay = self.api_config['api_retry_max_delay']
+        randomness = random.randint(0, 1000) / 1000.0
+
+        for retry in range(0, self.api_config['api_retries']):
             response, info = fetch_url(
                 module=self.module,
                 url=url,
@@ -165,12 +176,15 @@ class Vultr:
                 timeout=self.api_config['api_timeout'],
             )
 
-            # Did we hit the rate limit?
-            if info.get('status') and info.get('status') != 503:
+            if info.get('status') == 200:
                 break
 
             # Vultr has a rate limiting requests per second, try to be polite
-            time.sleep(1)
+            # Use exponential backoff plus a little bit of randomness
+            delay = 2 ** retry + randomness
+            if delay > retry_max_delay:
+                delay = retry_max_delay + randomness
+            time.sleep(delay)
 
         else:
             self.fail_json(msg="Reached API retries limit %s for URL %s, method %s with data %s. Returned %s, with body: %s %s" % (
@@ -198,35 +212,55 @@ class Vultr:
             return {}
 
         try:
-            return self.module.from_json(to_text(res))
+            return self.module.from_json(to_native(res)) or {}
         except ValueError as e:
             self.module.fail_json(msg="Could not process response into json: %s" % e)
 
-    def query_resource_by_key(self, key, value, resource='regions', query_by='list', params=None, use_cache=False):
+    def query_resource_by_key(self, key, value, resource='regions', query_by='list', params=None, use_cache=False, id_key=None):
         if not value:
             return {}
 
+        r_list = None
         if use_cache:
-            if resource in self.api_cache:
-                if self.api_cache[resource] and self.api_cache[resource].get(key) == value:
-                    return self.api_cache[resource]
+            r_list = self.api_cache.get(resource)
 
-        r_list = self.api_query(path="/v1/%s/%s" % (resource, query_by), data=params)
+        if not r_list:
+            r_list = self.api_query(path="/v1/%s/%s" % (resource, query_by), data=params)
+            if use_cache:
+                self.api_cache.update({
+                    resource: r_list
+                })
 
         if not r_list:
             return {}
 
-        for r_id, r_data in r_list.items():
-            if r_data[key] == value:
-                self.api_cache.update({
-                    resource: r_data
-                })
-                return r_data
+        elif isinstance(r_list, list):
+            for r_data in r_list:
+                if str(r_data[key]) == str(value):
+                    return r_data
+                if id_key is not None and to_text(r_data[id_key]) == to_text(value):
+                    return r_data
+        elif isinstance(r_list, dict):
+            for r_id, r_data in r_list.items():
+                if str(r_data[key]) == str(value):
+                    return r_data
+                if id_key is not None and to_text(r_data[id_key]) == to_text(value):
+                    return r_data
 
-        self.module.fail_json(msg="Could not find %s with %s: %s" % (resource, key, value))
+        if id_key:
+            msg = "Could not find %s with ID or %s: %s" % (resource, key, value)
+        else:
+            msg = "Could not find %s with %s: %s" % (resource, key, value)
+        self.module.fail_json(msg=msg)
 
-    def normalize_result(self, resource):
-        for search_key, config in self.returns.items():
+    @staticmethod
+    def normalize_result(resource, schema, remove_missing_keys=True):
+        if remove_missing_keys:
+            fields_to_remove = set(resource.keys()) - set(schema.keys())
+            for field in fields_to_remove:
+                resource.pop(field)
+
+        for search_key, config in schema.items():
             if search_key in resource:
                 if 'convert_to' in config:
                     if config['convert_to'] == 'int':
@@ -235,6 +269,9 @@ class Vultr:
                         resource[search_key] = float(resource[search_key])
                     elif config['convert_to'] == 'bool':
                         resource[search_key] = True if resource[search_key] == 'yes' else False
+
+                if 'transform' in config:
+                    resource[search_key] = config['transform'](resource[search_key])
 
                 if 'key' in config:
                     resource[config['key']] = resource[search_key]
@@ -245,8 +282,49 @@ class Vultr:
     def get_result(self, resource):
         if resource:
             if isinstance(resource, list):
-                self.result[self.namespace] = [self.normalize_result(item) for item in resource]
+                self.result[self.namespace] = [Vultr.normalize_result(item, self.returns) for item in resource]
             else:
-                self.result[self.namespace] = self.normalize_result(resource)
+                self.result[self.namespace] = Vultr.normalize_result(resource, self.returns)
 
         return self.result
+
+    def get_plan(self, plan=None, key='name'):
+        value = plan or self.module.params.get('plan')
+
+        return self.query_resource_by_key(
+            key=key,
+            value=value,
+            resource='plans',
+            use_cache=True
+        )
+
+    def get_firewallgroup(self, firewallgroup=None, key='description'):
+        value = firewallgroup or self.module.params.get('firewallgroup')
+
+        return self.query_resource_by_key(
+            key=key,
+            value=value,
+            resource='firewall',
+            query_by='group_list',
+            use_cache=True
+        )
+
+    def get_application(self, application=None, key='name'):
+        value = application or self.module.params.get('application')
+
+        return self.query_resource_by_key(
+            key=key,
+            value=value,
+            resource='app',
+            use_cache=True
+        )
+
+    def get_region(self, region=None, key='name'):
+        value = region or self.module.params.get('region')
+
+        return self.query_resource_by_key(
+            key=key,
+            value=value,
+            resource='regions',
+            use_cache=True
+        )

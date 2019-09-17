@@ -31,36 +31,42 @@ options:
         description:
             - ESXi hostname to be managed
         required: True
+        type: str
     device:
         description:
             - VMK interface name
         required: True
+        type: str
     current_switch_name:
         description:
             - Switch VMK interface is currently on
         required: True
+        type: str
     current_portgroup_name:
         description:
             - Portgroup name VMK interface is currently on
         required: True
+        type: str
     migrate_switch_name:
         description:
             - Switch name to migrate VMK interface to
         required: True
+        type: str
     migrate_portgroup_name:
         description:
             - Portgroup name to migrate VMK interface to
         required: True
+        type: str
 extends_documentation_fragment: vmware.documentation
 '''
 
 EXAMPLES = '''
 - name: Migrate Management vmk
   vmware_migrate_vmk:
-    hostname: vcsa_host
-    username: vcsa_user
-    password: vcsa_pass
-    esxi_hostname: esxi_hostname
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    esxi_hostname: "{{ esxi_hostname }}"
     device: vmk1
     current_switch_name: temp_vswitch
     current_portgroup_name: esx-mgmt

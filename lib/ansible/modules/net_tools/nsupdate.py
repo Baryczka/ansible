@@ -76,7 +76,12 @@ options:
     value:
         description:
             - Sets the record value.
-
+    protocol:
+        description:
+            - Sets the transport protocol (TCP or UDP). TCP is the recommended and a more robust option.
+        default: 'tcp'
+        choices: ['tcp', 'udp']
+        version_added: 2.8
 '''
 
 EXAMPLES = '''
@@ -107,17 +112,36 @@ EXAMPLES = '''
     record: "puppet"
     type: "CNAME"
     state: absent
+
+- name: Add 1.1.168.192.in-addr.arpa. PTR for ansible.example.org
+  nsupdate:
+    key_name: "nsupdate"
+    key_secret: "+bFQtBCta7j2vWkjPkAFtgA=="
+    server: "10.1.1.1"
+    record: "1.1.168.192.in-addr.arpa."
+    type: "PTR"
+    value: "ansible.example.org."
+    state: present
+
+- name: Remove 1.1.168.192.in-addr.arpa. PTR
+  nsupdate:
+    key_name: "nsupdate"
+    key_secret: "+bFQtBCta7j2vWkjPkAFtgA=="
+    server: "10.1.1.1"
+    record: "1.1.168.192.in-addr.arpa."
+    type: "PTR"
+    state: absent
 '''
 
 RETURN = '''
 changed:
     description: If module has modified record
     returned: success
-    type: string
+    type: str
 record:
     description: DNS record
     returned: success
-    type: string
+    type: str
     sample: 'ansible'
 ttl:
     description: DNS record TTL
@@ -127,7 +151,7 @@ ttl:
 type:
     description: DNS record type
     returned: success
-    type: string
+    type: str
     sample: 'CNAME'
 value:
     description: DNS record value(s)
@@ -137,7 +161,7 @@ value:
 zone:
     description: DNS record zone
     returned: success
-    type: string
+    type: str
     sample: 'example.org.'
 dns_rc:
     description: dnspython return code
@@ -147,13 +171,16 @@ dns_rc:
 dns_rc_str:
     description: dnspython return code (string representation)
     returned: always
-    type: string
+    type: str
     sample: 'REFUSED'
 '''
+
+import traceback
 
 from binascii import Error as binascii_error
 from socket import error as socket_error
 
+DNSPYTHON_IMP_ERR = None
 try:
     import dns.update
     import dns.query
@@ -163,9 +190,10 @@ try:
 
     HAVE_DNSPYTHON = True
 except ImportError:
+    DNSPYTHON_IMP_ERR = traceback.format_exc()
     HAVE_DNSPYTHON = False
 
-from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.basic import AnsibleModule, missing_required_lib
 from ansible.module_utils._text import to_native
 
 
@@ -190,6 +218,11 @@ class RecordManager(object):
             if self.zone[-1] != '.':
                 self.zone += '.'
 
+        if module.params['record'][-1] != '.':
+            self.fqdn = module.params['record'] + '.' + self.zone
+        else:
+            self.fqdn = module.params['record']
+
         if module.params['key_name']:
             try:
                 self.keyring = dns.tsigkeyring.from_text({
@@ -207,12 +240,25 @@ class RecordManager(object):
         else:
             self.algorithm = module.params['key_algorithm']
 
+        if self.module.params['type'].lower() == 'txt':
+            self.value = list(map(self.txt_helper, self.module.params['value']))
+        else:
+            self.value = self.module.params['value']
+
         self.dns_rc = 0
+
+    def txt_helper(self, entry):
+        if entry[0] == '"' and entry[-1] == '"':
+            return entry
+        return '"{text}"'.format(text=entry)
 
     def __do_update(self, update):
         response = None
         try:
-            response = dns.query.tcp(update, self.module.params['server'], timeout=10, port=self.module.params['port'])
+            if self.module.params['protocol'] == 'tcp':
+                response = dns.query.tcp(update, self.module.params['server'], timeout=10, port=self.module.params['port'])
+            else:
+                response = dns.query.udp(update, self.module.params['server'], timeout=10, port=self.module.params['port'])
         except (dns.tsig.PeerBadKey, dns.tsig.PeerBadSignature) as e:
             self.module.fail_json(msg='TSIG update error (%s): %s' % (e.__class__.__name__, to_native(e)))
         except (socket_error, dns.exception.Timeout) as e:
@@ -249,7 +295,7 @@ class RecordManager(object):
 
     def create_record(self):
         update = dns.update.Update(self.zone, keyring=self.keyring, keyalgorithm=self.algorithm)
-        for entry in self.module.params['value']:
+        for entry in self.value:
             try:
                 update.add(self.module.params['record'],
                            self.module.params['ttl'],
@@ -266,7 +312,7 @@ class RecordManager(object):
     def modify_record(self):
         update = dns.update.Update(self.zone, keyring=self.keyring, keyalgorithm=self.algorithm)
         update.delete(self.module.params['record'], self.module.params['type'])
-        for entry in self.module.params['value']:
+        for entry in self.value:
             try:
                 update.add(self.module.params['record'],
                            self.module.params['ttl'],
@@ -316,7 +362,7 @@ class RecordManager(object):
         if self.dns_rc == 0:
             if self.module.params['state'] == 'absent':
                 return 1
-            for entry in self.module.params['value']:
+            for entry in self.value:
                 try:
                     update.present(self.module.params['record'], self.module.params['type'], entry)
                 except AttributeError:
@@ -326,11 +372,28 @@ class RecordManager(object):
             response = self.__do_update(update)
             self.dns_rc = dns.message.Message.rcode(response)
             if self.dns_rc == 0:
-                return 1
+                if self.ttl_changed():
+                    return 2
+                else:
+                    return 1
             else:
                 return 2
         else:
             return 0
+
+    def ttl_changed(self):
+        query = dns.message.make_query(self.fqdn, self.module.params['type'])
+
+        try:
+            if self.module.params['protocol'] == 'tcp':
+                lookup = dns.query.tcp(query, self.module.params['server'], timeout=10, port=self.module.params['port'])
+            else:
+                lookup = dns.query.udp(query, self.module.params['server'], timeout=10, port=self.module.params['port'])
+        except (socket_error, dns.exception.Timeout) as e:
+            self.module.fail_json(msg='DNS server error: (%s): %s' % (e.__class__.__name__, to_native(e)))
+
+        current_ttl = lookup.answer[0].ttl
+        return current_ttl != self.module.params['ttl']
 
 
 def main():
@@ -349,13 +412,14 @@ def main():
             record=dict(required=True, type='str'),
             type=dict(required=False, default='A', type='str'),
             ttl=dict(required=False, default=3600, type='int'),
-            value=dict(required=False, default=None, type='list')
+            value=dict(required=False, default=None, type='list'),
+            protocol=dict(required=False, default='tcp', choices=['tcp', 'udp'], type='str')
         ),
         supports_check_mode=True
     )
 
     if not HAVE_DNSPYTHON:
-        module.fail_json(msg='python library dnspython required: pip install dnspython')
+        module.fail_json(msg=missing_required_lib('dnspython'), exception=DNSPYTHON_IMP_ERR)
 
     if len(module.params["record"]) == 0:
         module.fail_json(msg='record cannot be empty.')
@@ -376,7 +440,7 @@ def main():
                                 record=module.params['record'],
                                 type=module.params['type'],
                                 ttl=module.params['ttl'],
-                                value=module.params['value'])
+                                value=record.value)
 
         module.exit_json(**result)
 

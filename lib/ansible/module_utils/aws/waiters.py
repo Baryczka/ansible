@@ -151,6 +151,19 @@ ec2_data = {
                 },
             ]
         },
+        "VpnGatewayDetached": {
+            "delay": 5,
+            "maxAttempts": 40,
+            "operation": "DescribeVpnGateways",
+            "acceptors": [
+                {
+                    "matcher": "path",
+                    "expected": True,
+                    "argument": "VpnGateways[0].State == 'available'",
+                    "state": "success"
+                },
+            ]
+        },
     }
 }
 
@@ -199,6 +212,44 @@ eks_data = {
                     "expected": "ResourceNotFoundException"
                 }
             ]
+        },
+        "ClusterDeleted": {
+            "delay": 20,
+            "maxAttempts": 60,
+            "operation": "DescribeCluster",
+            "acceptors": [
+                {
+                    "state": "retry",
+                    "matcher": "path",
+                    "argument": "cluster.status != 'DELETED'",
+                    "expected": True
+                },
+                {
+                    "state": "success",
+                    "matcher": "error",
+                    "expected": "ResourceNotFoundException"
+                }
+            ]
+        }
+    }
+}
+
+
+rds_data = {
+    "version": 2,
+    "waiters": {
+        "DBInstanceStopped": {
+            "delay": 20,
+            "maxAttempts": 60,
+            "operation": "DescribeDBInstances",
+            "acceptors": [
+                {
+                    "state": "success",
+                    "matcher": "pathAll",
+                    "argument": "DBInstances[].DBInstanceStatus",
+                    "expected": "stopped"
+                },
+            ]
         }
     }
 }
@@ -217,6 +268,11 @@ def waf_model(name):
 def eks_model(name):
     eks_models = core_waiter.WaiterModel(waiter_config=eks_data)
     return eks_models.get_waiter(name)
+
+
+def rds_model(name):
+    rds_models = core_waiter.WaiterModel(waiter_config=rds_data)
+    return rds_models.get_waiter(name)
 
 
 waiters_by_name = {
@@ -274,7 +330,19 @@ waiters_by_name = {
         core_waiter.NormalizedOperationMethod(
             ec2.describe_vpn_gateways
         )),
+    ('EC2', 'vpn_gateway_detached'): lambda ec2: core_waiter.Waiter(
+        'vpn_gateway_detached',
+        ec2_model('VpnGatewayDetached'),
+        core_waiter.NormalizedOperationMethod(
+            ec2.describe_vpn_gateways
+        )),
     ('WAF', 'change_token_in_sync'): lambda waf: core_waiter.Waiter(
+        'change_token_in_sync',
+        waf_model('ChangeTokenInSync'),
+        core_waiter.NormalizedOperationMethod(
+            waf.get_change_token_status
+        )),
+    ('WAFRegional', 'change_token_in_sync'): lambda waf: core_waiter.Waiter(
         'change_token_in_sync',
         waf_model('ChangeTokenInSync'),
         core_waiter.NormalizedOperationMethod(
@@ -285,6 +353,18 @@ waiters_by_name = {
         eks_model('ClusterActive'),
         core_waiter.NormalizedOperationMethod(
             eks.describe_cluster
+        )),
+    ('EKS', 'cluster_deleted'): lambda eks: core_waiter.Waiter(
+        'cluster_deleted',
+        eks_model('ClusterDeleted'),
+        core_waiter.NormalizedOperationMethod(
+            eks.describe_cluster
+        )),
+    ('RDS', 'db_instance_stopped'): lambda rds: core_waiter.Waiter(
+        'db_instance_stopped',
+        rds_model('DBInstanceStopped'),
+        core_waiter.NormalizedOperationMethod(
+            rds.describe_db_instances
         )),
 }
 

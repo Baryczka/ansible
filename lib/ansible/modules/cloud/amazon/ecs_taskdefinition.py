@@ -26,7 +26,7 @@ short_description: register a task definition in ecs
 description:
     - Registers or deregisters task definitions in the Amazon Web Services (AWS) EC2 Container Service (ECS)
 version_added: "2.0"
-author: Mark Chance(@Java1Guy)
+author: Mark Chance (@Java1Guy)
 requirements: [ json, botocore, boto3 ]
 options:
     state:
@@ -51,6 +51,7 @@ options:
             - Always create new task definition
         required: False
         version_added: 2.5
+        type: bool
     containers:
         description:
             - A list of containers definitions
@@ -119,8 +120,9 @@ EXAMPLES = '''
       logConfiguration:
         logDriver: awslogs
         options:
-          awslogs-group: ecs
+          awslogs-group: /ecs/test-cluster-taskdef
           awslogs-region: us-west-2
+          awslogs-stream-prefix: ecs
     - name: busybox
       command:
         - >
@@ -153,7 +155,7 @@ EXAMPLES = '''
       - containerPort: 8080
         hostPort:      8080
       cpu: 512
-      memory: 1GB
+      memory: 1024
     state: present
 
 - name: Create task definition
@@ -166,6 +168,30 @@ EXAMPLES = '''
       portMappings:
       - containerPort: 8080
         hostPort:      8080
+    launch_type: FARGATE
+    cpu: 512
+    memory: 1024
+    state: present
+    network_mode: awsvpc
+
+# Create Task Definition with Environment Variables and Secrets
+- name: Create task definition
+  ecs_taskdefinition:
+    family: nginx
+    containers:
+    - name: nginx
+      essential: true
+      image: "nginx"
+      environment:
+        - name: "PORT"
+          value: "8080"
+      secrets:
+        # For variables stored in Secrets Manager
+        - name: "NGINX_HOST"
+          valueFrom: "arn:aws:secretsmanager:us-west-2:123456789012:secret:nginx/NGINX_HOST"
+        # For variables stored in Parameter Store
+        - name: "API_KEY"
+          valueFrom: "arn:aws:ssm:us-west-2:123456789012:parameter/nginx/API_KEY"
     launch_type: FARGATE
     cpu: 512
     memory: 1GB
@@ -346,7 +372,7 @@ def main():
         existing_definitions_in_family = task_mgr.describe_task_definitions(module.params['family'])
 
         if 'revision' in module.params and module.params['revision']:
-            # The definition specifies revision. We must gurantee that an active revision of that number will result from this.
+            # The definition specifies revision. We must guarantee that an active revision of that number will result from this.
             revision = int(module.params['revision'])
 
             # A revision has been explicitly specified. Attempt to locate a matching revision
@@ -355,7 +381,7 @@ def main():
 
             if existing and existing['status'] != "ACTIVE":
                 # We cannot reactivate an inactive revision
-                module.fail_json(msg="A task in family '%s' already exists for revsion %d, but it is inactive" % (family, revision))
+                module.fail_json(msg="A task in family '%s' already exists for revision %d, but it is inactive" % (family, revision))
             elif not existing:
                 if not existing_definitions_in_family and revision != 1:
                     module.fail_json(msg="You have specified a revision of %d but a created revision would be 1" % revision)
@@ -390,8 +416,11 @@ def main():
 
                 return True
 
-            def _task_definition_matches(requested_volumes, requested_containers, existing_task_definition):
+            def _task_definition_matches(requested_volumes, requested_containers, requested_task_role_arn, existing_task_definition):
                 if td['status'] != "ACTIVE":
+                    return None
+
+                if requested_task_role_arn != td.get('taskRoleArn', ""):
                     return None
 
                 existing_volumes = td.get('volumes', []) or []
@@ -433,9 +462,10 @@ def main():
 
             # No revision explicitly specified. Attempt to find an active, matching revision that has all the properties requested
             for td in existing_definitions_in_family:
-                requested_volumes = module.params.get('volumes', []) or []
-                requested_containers = module.params.get('containers', []) or []
-                existing = _task_definition_matches(requested_volumes, requested_containers, td)
+                requested_volumes = module.params['volumes'] or []
+                requested_containers = module.params['containers'] or []
+                requested_task_role_arn = module.params['task_role_arn']
+                existing = _task_definition_matches(requested_volumes, requested_containers, requested_task_role_arn, td)
 
                 if existing:
                     break

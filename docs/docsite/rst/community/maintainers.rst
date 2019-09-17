@@ -14,7 +14,7 @@ In addition to the information below, module maintainers should be familiar with
 * Documentation on :ref:`module development <developing_modules>`
 
 
-Maintainer Responsibilities
+Maintainer responsibilities
 ===========================
 
 When you contribute a new module to the `ansible/ansible <https://github.com/ansible/ansible>`_ repository, you become the maintainer for that module once it has been merged. Maintainership empowers you with the authority to accept, reject, or request revisions to pull requests on your module -- but as they say, "with great power comes great responsibility."
@@ -27,10 +27,10 @@ Finally, following the `ansible-devel <https://groups.google.com/forum/#!forum/a
 
 The Ansible community hopes that you will find that maintaining your module is as rewarding for you as having the module is for the wider community.
 
-Pull Requests, Issues, and Workflow
+Pull requests, issues, and workflow
 ===================================
 
-Pull Requests
+Pull requests
 -------------
 
 Module pull requests are located in the `main Ansible repository <https://github.com/ansible/ansible/pulls>`_.
@@ -44,22 +44,22 @@ Issues for modules, including bug reports, documentation bug reports, and featur
 
 Issues for modules are routed to their maintainers via an automated process. This process is still being refined, and currently depends upon the issue creator to provide adequate details (specifically, providing the proper module name) in order to route it correctly. If you are a maintainer of a specific module, it is recommended that you periodically search module issues for issues which mention your module's name (or some variation on that name), as well as setting an appropriate notification process for receiving notification of mentions of your GitHub ID.
 
-PR Workflow
+PR workflow
 -----------
 
 Automated routing of pull requests is handled by a tool called `Ansibot <https://github.com/ansible/ansibullbot>`_.
 
 Being moderately familiar with how the workflow behind the bot operates can be helpful to you, and -- should things go awry -- your feedback can be helpful to the folks that continually help Ansibullbot to evolve.
 
-A detailed explanation of the PR workflow can be seen in the :doc:`development_process`
+A detailed explanation of the PR workflow can be seen in the :ref:`community_development_process`.
 
 Maintainers (BOTMETA.yml)
 -------------------------
 
 The full list of maintainers is located in `BOTMETA.yml <https://github.com/ansible/ansible/blob/devel/.github/BOTMETA.yml>`_.
 
-Changing Maintainership
------------------------
+Adding and removing maintainers
+===============================
 
 Communities change over time, and no one maintains a module forever. If you'd like to propose an additional maintainer for your module, please submit a PR to ``BOTMETA.yml`` with the GitHub username of the new maintainer.
 
@@ -68,6 +68,6 @@ If you'd like to step down as a maintainer, please submit a PR to the ``BOTMETA.
 Tools and other Resources
 =========================
 
-* `PRs in flight, organised by directory <https://ansible.sivel.net/pr/byfile.html>`_.
-* Ansibullbot: https://github.com/ansible/ansibullbot
-* :doc:`development_process`
+* `PRs in flight, organized by directory <https://ansible.sivel.net/pr/byfile.html>`_
+* `Ansibullbot <https://github.com/ansible/ansibullbot>`_
+* :ref:`community_development_process`

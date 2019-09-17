@@ -18,7 +18,7 @@ ANSIBLE_METADATA = {'metadata_version': '1.1',
 DOCUMENTATION = """
 ---
 module: openvswitch_db
-author: "Mark Hamilton (mhamilton@vmware.com)"
+author: "Mark Hamilton (@markleehamilton) <mhamilton@vmware.com>"
 version_added: 2.0
 short_description: Configure open vswitch database.
 requirements: [ "ovs-vsctl >= 2.3.3" ]
@@ -120,15 +120,14 @@ def map_obj_to_commands(want, have, module):
                                   "%(col)s"
             commands.append(templatized_command % module.params)
     else:
+        if want == have:
+            # Nothing to commit
+            return commands
         if module.params['key'] is None:
             templatized_command = "%(ovs-vsctl)s -t %(timeout)s set %(table)s %(record)s " \
                                   "%(col)s=%(value)s"
             commands.append(templatized_command % module.params)
-        elif 'key' not in have.keys():
-            templatized_command = "%(ovs-vsctl)s -t %(timeout)s add %(table)s %(record)s " \
-                                  "%(col)s %(key)s=%(value)s"
-            commands.append(templatized_command % module.params)
-        elif want['value'] != have['value']:
+        else:
             templatized_command = "%(ovs-vsctl)s -t %(timeout)s set %(table)s %(record)s " \
                                   "%(col)s:%(key)s=%(value)s"
             commands.append(templatized_command % module.params)
@@ -158,7 +157,7 @@ def map_config_to_obj(module):
     if NON_EMPTY_MAP_RE.match(col_value):
         for kv in col_value[1:-1].split(', '):
             k, v = kv.split('=')
-            col_value_to_dict[k.strip()] = v.strip()
+            col_value_to_dict[k.strip()] = v.strip('\"')
 
     obj = {
         'table': module.params['table'],
@@ -171,12 +170,14 @@ def map_config_to_obj(module):
             obj['key'] = module.params['key']
             obj['value'] = col_value_to_dict[module.params['key']]
     else:
-            obj['value'] = col_value.strip()
+        obj['value'] = str(col_value.strip())
 
     return obj
 
 
 def map_params_to_obj(module):
+    if module.params['value'] in ['True', 'False']:
+        module.params['value'] = module.params['value'].lower()
     obj = {
         'table': module.params['table'],
         'record': module.params['record'],
@@ -199,7 +200,7 @@ def main():
         'record': {'required': True},
         'col': {'required': True},
         'key': {'required': False},
-        'value': {'required': True},
+        'value': {'required': True, 'type': 'str'},
         'timeout': {'default': 5, 'type': 'int'},
     }
 

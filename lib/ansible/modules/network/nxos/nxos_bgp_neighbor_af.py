@@ -98,6 +98,7 @@ options:
   allowas_in:
     description:
       - Activate allowas-in property
+    type: bool
   allowas_in_max:
     description:
       - Max-occurrences value for allowas_in. Valid values are
@@ -336,11 +337,6 @@ def get_custom_value(arg, config, module):
     command = PARAM_TO_COMMAND_KEYMAP.get(arg)
     splitted_config = config.splitlines()
     value = ''
-
-    command_re = re.compile(r'\s+{0}\s*'.format(command), re.M)
-    has_command = command_re.search(config)
-    command_val_re = re.compile(r'(?:{0}\s)(?P<value>.*)$'.format(command), re.M)
-    has_command_val = command_val_re.search(config)
 
     if arg.startswith('additional_paths'):
         value = 'inherit'

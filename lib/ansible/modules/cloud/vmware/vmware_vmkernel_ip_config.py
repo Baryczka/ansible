@@ -31,14 +31,17 @@ options:
         description:
             - VMkernel interface name
         required: True
+        type: str
     ip_address:
         description:
             - IP address to assign to VMkernel interface
         required: True
+        type: str
     subnet_mask:
         description:
             - Subnet Mask to assign to VMkernel interface
         required: True
+        type: str
 extends_documentation_fragment: vmware.documentation
 '''
 
@@ -47,9 +50,9 @@ EXAMPLES = '''
 
 - name: Configure IP address on ESX host
   vmware_vmkernel_ip_config:
-    hostname: esxi_hostname
-    username: esxi_username
-    password: esxi_password
+    hostname: '{{ esxi_hostname }}'
+    username: '{{ esxi_username }}'
+    password: '{{ esxi_password }}'
     vmk_name: vmk0
     ip_address: 10.0.0.10
     subnet_mask: 255.255.255.0
@@ -104,7 +107,7 @@ def main():
         host = get_all_objs(content, [vim.HostSystem])
         if not host:
             module.fail_json(msg="Unable to locate Physical Host.")
-        host_system = host.keys()[0]
+        host_system = list(host)[0]
         changed = configure_vmkernel_ip_address(host_system, vmk_name, ip_address, subnet_mask)
         module.exit_json(changed=changed)
     except vmodl.RuntimeFault as runtime_fault:

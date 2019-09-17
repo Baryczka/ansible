@@ -26,7 +26,7 @@ description:
 - State 'reboot-host', 'shutdown-host' and 'power-down-to-standby' are not supported by all the host systems.
 version_added: 2.6
 author:
-- Abhijeet Kasurde (@Akasurde) <akasurde@redhat.com>
+- Abhijeet Kasurde (@Akasurde)
 requirements:
 - python >= 2.6
 - PyVmomi
@@ -36,14 +36,17 @@ options:
     - Set the state of the host system.
     choices: [ 'power-down-to-standby', 'power-up-from-standby', 'shutdown-host', 'reboot-host' ]
     default: 'shutdown-host'
+    type: str
   esxi_hostname:
     description:
     - Name of the host system to work with.
     - This is required parameter if C(cluster_name) is not specified.
+    type: str
   cluster_name:
     description:
     - Name of the cluster from which all host systems will be used.
     - This is required parameter if C(esxi_hostname) is not specified.
+    type: str
   force:
     description:
     - 'This parameter specify if the host should be proceeding with user defined powerstate
@@ -60,39 +63,40 @@ options:
     - 'Ignored if C(state) set to C(reboot-host) or C(shutdown-host).'
     - 'This parameter is defined in seconds.'
     default: 600
+    type: int
 extends_documentation_fragment: vmware.documentation
 '''
 
 EXAMPLES = r'''
 - name: Set the state of a host system to reboot
   vmware_host_powerstate:
-    hostname: 192.0.2.44
-    username: administrator@vsphere.local
-    password: vmware
+    hostname: '{{ vcenter_hostname }}'
+    username: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'
     validate_certs: no
-    esxi_hostname: esxi01
+    esxi_hostname: '{{ esxi_hostname }}'
     state: reboot-host
   delegate_to: localhost
   register: reboot_host
 
 - name: Set the state of a host system to power down to standby
   vmware_host_powerstate:
-    hostname: 192.0.2.44
-    username: administrator@vsphere.local
-    password: vmware
+    hostname: '{{ vcenter_hostname }}'
+    username: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'
     validate_certs: no
-    esxi_hostname: power-down-to-standby
+    esxi_hostname: '{{ esxi_hostname }}'
     state: power-down-to-standby
   delegate_to: localhost
   register: power_down
 
 - name: Set the state of all host systems from cluster to reboot
   vmware_host_powerstate:
-    hostname: 192.0.2.44
-    username: administrator@vsphere.local
-    password: vmware
+    hostname: '{{ vcenter_hostname }}'
+    username: '{{ vcenter_username }}'
+    password: '{{ vcenter_password }}'
     validate_certs: no
-    cluster_name: DC0_C0
+    cluster_name: '{{ cluster_name }}'
     state: reboot-host
   delegate_to: localhost
   register: reboot_host
@@ -110,11 +114,6 @@ result:
         },
     }
 '''
-
-try:
-    from pyVmomi import vim, vmodl
-except ImportError:
-    pass
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.vmware import PyVmomi, vmware_argument_spec, wait_for_task, TaskError

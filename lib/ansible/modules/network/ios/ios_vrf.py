@@ -81,6 +81,7 @@ options:
         VRF definition absolute.  It will remove any previously configured
         VRFs on the device.
     default: false
+    type: bool
   state:
     description:
       - Configures the state of the VRF definition
@@ -331,40 +332,40 @@ def map_obj_to_commands(updates, module):
                 add_command_to_vrf(want['name'], cmd, commands)
 
         if needs_update(want, have, 'route_import_ipv4'):
-                cmd = 'address-family ipv4'
+            cmd = 'address-family ipv4'
+            add_command_to_vrf(want['name'], cmd, commands)
+            for route in want['route_import_ipv4']:
+                cmd = 'route-target import %s' % route
                 add_command_to_vrf(want['name'], cmd, commands)
-                for route in want['route_import_ipv4']:
-                    cmd = 'route-target import %s' % route
-                    add_command_to_vrf(want['name'], cmd, commands)
-                cmd = 'exit-address-family'
-                add_command_to_vrf(want['name'], cmd, commands)
+            cmd = 'exit-address-family'
+            add_command_to_vrf(want['name'], cmd, commands)
 
         if needs_update(want, have, 'route_export_ipv4'):
-                cmd = 'address-family ipv4'
+            cmd = 'address-family ipv4'
+            add_command_to_vrf(want['name'], cmd, commands)
+            for route in want['route_export_ipv4']:
+                cmd = 'route-target export %s' % route
                 add_command_to_vrf(want['name'], cmd, commands)
-                for route in want['route_export_ipv4']:
-                    cmd = 'route-target export %s' % route
-                    add_command_to_vrf(want['name'], cmd, commands)
-                cmd = 'exit-address-family'
-                add_command_to_vrf(want['name'], cmd, commands)
+            cmd = 'exit-address-family'
+            add_command_to_vrf(want['name'], cmd, commands)
 
         if needs_update(want, have, 'route_import_ipv6'):
-                cmd = 'address-family ipv6'
+            cmd = 'address-family ipv6'
+            add_command_to_vrf(want['name'], cmd, commands)
+            for route in want['route_import_ipv6']:
+                cmd = 'route-target import %s' % route
                 add_command_to_vrf(want['name'], cmd, commands)
-                for route in want['route_import_ipv6']:
-                    cmd = 'route-target import %s' % route
-                    add_command_to_vrf(want['name'], cmd, commands)
-                cmd = 'exit-address-family'
-                add_command_to_vrf(want['name'], cmd, commands)
+            cmd = 'exit-address-family'
+            add_command_to_vrf(want['name'], cmd, commands)
 
         if needs_update(want, have, 'route_export_ipv6'):
-                cmd = 'address-family ipv6'
+            cmd = 'address-family ipv6'
+            add_command_to_vrf(want['name'], cmd, commands)
+            for route in want['route_export_ipv6']:
+                cmd = 'route-target export %s' % route
                 add_command_to_vrf(want['name'], cmd, commands)
-                for route in want['route_export_ipv6']:
-                    cmd = 'route-target export %s' % route
-                    add_command_to_vrf(want['name'], cmd, commands)
-                cmd = 'exit-address-family'
-                add_command_to_vrf(want['name'], cmd, commands)
+            cmd = 'exit-address-family'
+            add_command_to_vrf(want['name'], cmd, commands)
 
         if want['interfaces'] is not None:
             # handle the deletes
@@ -405,12 +406,16 @@ def parse_rd(configobj, name):
         return match.group(1)
 
 
-def parse_interfaces(configobj, name):
-    vrf_cfg = 'vrf forwarding %s' % name
-    interfaces = list()
-    for intf in re.findall('^interface .+', str(configobj), re.M):
-        if vrf_cfg in '\n'.join(configobj[intf].children):
-            interfaces.append(intf.split(' ')[1])
+def parse_interfaces(configobj):
+    vrf_cfg = 'vrf forwarding'
+    interfaces = dict()
+    for intf in set(re.findall('^interface .+', str(configobj), re.M)):
+        for line in configobj[intf].children:
+            if vrf_cfg in line:
+                try:
+                    interfaces[line.split()[-1]].append(intf.split(' ')[1])
+                except KeyError:
+                    interfaces[line.split()[-1]] = [intf.split(' ')[1]]
     return interfaces
 
 
@@ -507,13 +512,16 @@ def map_config_to_obj(module):
         return list()
 
     instances = list()
+
+    interfaces = parse_interfaces(configobj)
+
     for item in set(match):
         obj = {
             'name': item,
             'state': 'present',
             'description': parse_description(configobj, item),
             'rd': parse_rd(configobj, item),
-            'interfaces': parse_interfaces(configobj, item),
+            'interfaces': interfaces.get(item),
             'route_import': parse_import(configobj, item),
             'route_export': parse_export(configobj, item),
             'route_both': parse_both(configobj, item),

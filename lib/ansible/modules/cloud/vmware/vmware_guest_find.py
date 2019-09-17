@@ -21,7 +21,7 @@ description:
     - Find the folder path(s) for a virtual machine by name or UUID
 version_added: 2.4
 author:
-    - Abhijeet Kasurde <akasurde@redhat.com>
+    - Abhijeet Kasurde (@Akasurde) <akasurde@redhat.com>
 notes:
     - Tested on vSphere 6.5
 requirements:
@@ -32,23 +32,32 @@ options:
      description:
      - Name of the VM to work with.
      - This is required if C(uuid) parameter is not supplied.
+     type: str
    uuid:
      description:
-     - UUID of the instance to manage if known, this is VMware's BIOS UUID.
+     - UUID of the instance to manage if known, this is VMware's BIOS UUID by default.
      - This is required if C(name) parameter is not supplied.
+     type: str
+   use_instance_uuid:
+     description:
+     - Whether to use the VMware instance UUID rather than the BIOS UUID.
+     default: no
+     type: bool
+     version_added: '2.8'
    datacenter:
      description:
      - Destination datacenter for the find operation.
      - Deprecated in 2.5, will be removed in 2.9 release.
+     type: str
 extends_documentation_fragment: vmware.documentation
 '''
 
 EXAMPLES = r'''
 - name: Find Guest's Folder using name
   vmware_guest_find:
-    hostname: 192.168.1.209
-    username: administrator@vsphere.local
-    password: vmware
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
     validate_certs: no
     name: testvm
   delegate_to: localhost
@@ -56,10 +65,9 @@ EXAMPLES = r'''
 
 - name: Find Guest's Folder using UUID
   vmware_guest_find:
-    hostname: 192.168.1.209
-    username: administrator@vsphere.local
-    password: vmware
-    validate_certs: no
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
     uuid: 38c4c89c-b3d7-4ae6-ae4e-43c5118eae49
   delegate_to: localhost
   register: vm_folder
@@ -91,13 +99,17 @@ class PyVmomiHelper(PyVmomi):
         super(PyVmomiHelper, self).__init__(module)
         self.name = self.params['name']
         self.uuid = self.params['uuid']
+        self.use_instance_uuid = self.params['use_instance_uuid']
 
     def getvm_folder_paths(self):
         results = []
         vms = []
 
         if self.uuid:
-            vm_obj = find_vm_by_id(self.content, vm_id=self.uuid, vm_id_type="uuid")
+            if self.use_instance_uuid:
+                vm_obj = find_vm_by_id(self.content, vm_id=self.uuid, vm_id_type="instance_uuid")
+            else:
+                vm_obj = find_vm_by_id(self.content, vm_id=self.uuid, vm_id_type="uuid")
             if vm_obj is None:
                 self.module.fail_json(msg="Failed to find the virtual machine with UUID : %s" % self.uuid)
             vms = [vm_obj]
@@ -120,6 +132,7 @@ def main():
     argument_spec.update(
         name=dict(type='str'),
         uuid=dict(type='str'),
+        use_instance_uuid=dict(type='bool', default=False),
         datacenter=dict(removed_in_version=2.9, type='str')
     )
 

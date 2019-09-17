@@ -22,6 +22,7 @@ short_description: Copy a file from a network device to Ansible Controller
 description:
   - This module provides functionality to copy file from network device to
     ansible controller.
+extends_documentation_fragment: network_agnostic
 options:
   src:
     description:
@@ -61,7 +62,7 @@ EXAMPLES = """
     src: running_cfg_ios1.txt
 
 - name: copy file from ios to common location at /tmp
-  network_put:
+  net_get:
     src: running_cfg_sw1.txt
     dest : /tmp/ios1.txt
 """

@@ -32,7 +32,7 @@ If($state -eq "present") {
         # the actual mount is async, so the CIMInstance result may not immediately contain the data we need
         $retry_count = 0
         While(-not $di.Attached -and $retry_count -lt 5) {
-          Sleep -Seconds 1 | Out-Null
+          Start-Sleep -Seconds 1 > $null
           $di = $di | Get-DiskImage
           $retry_count++
         }
@@ -49,26 +49,28 @@ If($state -eq "present") {
 
   If($di.Attached) { # only try to get the mount_path if the disk is attached (
     If($di.StorageType -eq 1) { # ISO, we can get the mountpoint directly from Get-Volume
-      $drive_letter = ($di | Get-Volume).DriveLetter
+      $drive_letters = ($di | Get-Volume).DriveLetter
     }
     ElseIf($di.StorageType -in @(2,3)) { # VHD/VHDX, need Get-Disk + Get-Partition to discover mountpoint
-      # FUTURE: support multi-partition VHDs
-      $drive_letter = ($di | Get-Disk | Get-Partition)[0].DriveLetter
+      $drive_letters = ($di | Get-Disk | Get-Partition).DriveLetter
     }
+    # remove any null entries (no drive letter)
+    $drive_letters = $drive_letters | Where-Object { $_ }
 
-
-    If(-not $drive_letter) {
+    If(-not $drive_letters) {
       Fail-Json -message "Unable to retrieve drive letter from mounted image"
     }
 
-    $result.mount_path = $drive_letter + ":\"
+    # mount_path is deprecated and will be removed in 2.11, use mount_paths which contains all the partitions instead
+    $result.mount_path = $drive_letters[0] + ":\"
+    $result.mount_paths = @($drive_letters | ForEach-Object { "$($_):\" })
   }
 }
 ElseIf($state -eq "absent") {
   If($di.Attached) {
     $result.changed = $true
     If(-not $check_mode) {
-      Dismount-DiskImage $image_path | Out-Null
+      Dismount-DiskImage $image_path > $null
     }
   }
 }

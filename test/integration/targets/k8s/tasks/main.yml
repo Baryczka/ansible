@@ -1,292 +1,88 @@
-# TODO: This is the only way I could get the kubeconfig, I don't know why. Running the lookup outside of debug seems to return an empty string
-- debug: msg={{ lookup('env', 'K8S_AUTH_KUBECONFIG') }}
-  register: kubeconfig
+- set_fact:
+    virtualenv: "{{ remote_tmp_dir }}/virtualenv"
+    virtualenv_command: "{{ ansible_python_interpreter }} -m virtualenv"
 
-# Kubernetes resources
-- name: Create a namespace
-  k8s:
-    name: testing
-    kind: namespace
-  register: output
+- set_fact:
+    virtualenv_interpreter: "{{ virtualenv }}/bin/python"
 
-- debug: msg={{ lookup("k8s", kind="Namespace", api_version="v1", resource_name='testing', kubeconfig=kubeconfig.msg) }}
+- pip:
+    name: virtualenv
 
-- name: show output
-  debug:
-    var: output
+# Test graceful failure for missing kubernetes-validate
 
-- name: Create a service
-  k8s:
-    state: present
-    resource_definition: &svc
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: web
-        namespace: testing
-        labels:
-          app: galaxy
-          service: web
-      spec:
-        selector:
-          app: galaxy
-          service: web
-        ports:
-        - protocol: TCP
-          targetPort: 8000
-          name: port-8000-tcp
-          port: 8000
-  register: output
+- pip:
+    name:
+      - 'openshift>=0.9.0'
+      - coverage
+    virtualenv: "{{ virtualenv }}"
+    virtualenv_command: "{{ virtualenv_command }}"
+    virtualenv_site_packages: no
 
-- name: show output
-  debug:
-    var: output
-
-- name: Create the service again
-  k8s:
-    state: present
-    resource_definition: *svc
-  register: output
-
-- name: Service creation should be idempotent
-  assert:
-    that: not output.changed
-
-- name: Create PVC
-  k8s:
-    state: present
-    inline: &pvc
-      apiVersion: v1
-      kind: PersistentVolumeClaim
-      metadata:
-        name: elastic-volume
-        namespace: testing
-      spec:
-        resources:
-          requests:
-            storage: 5Gi
-        accessModes:
-        - ReadWriteOnce
-
-- name: Show output
-  debug:
-    var: output
-
-- name: Create the PVC again
-  k8s:
-    state: present
-    inline: *pvc
-
-- name: PVC creation should be idempotent
-  assert:
-    that: not output.changed
-
-- name: Create deployment
-  k8s:
-    state: present
-    inline: &deployment
-      apiVersion: apps/v1beta1
-      kind: Deployment
-      metadata:
-        name: elastic
-        labels:
-          app: galaxy
-          service: elastic
-        namespace: testing
-      spec:
-        template:
-          metadata:
-            labels:
-              app: galaxy
-              service: elastic
-          spec:
-            containers:
-              - name: elastic
-                volumeMounts:
-                - mountPath: /usr/share/elasticsearch/data
-                  name: elastic-volume
-                command: ['elasticsearch']
-                image: 'ansible/galaxy-elasticsearch:2.4.6'
-            volumes:
-            - name: elastic-volume
-              persistentVolumeClaim:
-                claimName: elastic-volume
-        replicas: 1
-        strategy:
-          type: RollingUpdate
-  register: output
-
-- name: Show output
-  debug:
-    var: output
-
-- name: Create deployment again
-  k8s:
-    state: present
-    inline: *deployment
-  register: output
-
-- name: Deployment creation should be idempotent
-  assert:
-    that: not output.changed
-
-# OpenShift Resources
-- name: Create a project
-  k8s:
-    name: testing
-    kind: project
-    api_version: v1
-  register: output
-
-- name: show output
-  debug:
-    var: output
-
-- name: Create deployment config
-  k8s:
-    state: present
-    inline: &dc
-      apiVersion: v1
-      kind: DeploymentConfig
-      metadata:
-        name: elastic
-        labels:
-          app: galaxy
-          service: elastic
-        namespace: testing
-      spec:
-        template:
-          metadata:
-            labels:
-              app: galaxy
-              service: elastic
-          spec:
-            containers:
-              - name: elastic
-                volumeMounts:
-                - mountPath: /usr/share/elasticsearch/data
-                  name: elastic-volume
-                command: ['elasticsearch']
-                image: 'ansible/galaxy-elasticsearch:2.4.6'
-            volumes:
-            - name: elastic-volume
-              persistentVolumeClaim:
-                claimName: elastic-volume
-        replicas: 1
-        strategy:
-          type: Rolling
-  register: output
-
-- name: Show output
-  debug:
-    var: output
-
-- name: Create deployment config again
-  k8s:
-    state: present
-    inline: *dc
-  register: output
-
-- name: DC creation should be idempotent
-  assert:
-    that: not output.changed
-
-### Type tests
-- name: Create a namespace from a string
-  k8s:
-    definition: |+
-      ---
-      kind: Namespace
-      apiVersion: v1
-      metadata:
-        name: testing1
-
-- name: Namespace should exist
-  assert:
-    that: '{{ lookup("k8s", kind="Namespace", api_version="v1", resource_name="testing1", kubeconfig=kubeconfig.msg).status.phase == "Active" }}'
-
-- name: Create resources from a multidocument yaml string
-  k8s:
-    definition: |+
-      ---
-      kind: Namespace
-      apiVersion: v1
-      metadata:
-        name: testing2
-      ---
-      kind: Namespace
-      apiVersion: v1
-      metadata:
-        name: testing3
-
-- name: Resources should exist
-  assert:
-    that: lookup("k8s", kind="Namespace", api_version="v1", resource_name=item, kubeconfig=kubeconfig.msg).status.phase == "Active"
-  loop:
-    - testing2
-    - testing3
-
-- name: Delete resources from a multidocument yaml string
-  k8s:
-    state: absent
-    definition: |+
-      ---
-      kind: Namespace
-      apiVersion: v1
-      metadata:
-        name: testing2
-      ---
-      kind: Namespace
-      apiVersion: v1
-      metadata:
-        name: testing3
-
-- name: Resources should not exist
-  assert:
-    that: not ns or ns.status.phase == "Terminating"
-  loop:
-    - testing2
-    - testing3
+- include_tasks: validate_not_installed.yml
   vars:
-    ns: '{{ lookup("k8s", kind="Namespace", api_version="v1", resource_name=item, kubeconfig=kubeconfig.msg) }}'
+    ansible_python_interpreter: "{{ virtualenv_interpreter }}"
 
-- name: Create resources from a list
-  k8s:
-    definition:
-      - kind: Namespace
-        apiVersion: v1
-        metadata:
-          name: testing4
-      - kind: Namespace
-        apiVersion: v1
-        metadata:
-          name: testing5
-
-- name: Resources should exist
-  assert:
-    that: lookup("k8s", kind="Namespace", api_version="v1", resource_name=item, kubeconfig=kubeconfig.msg).status.phase == "Active"
-  loop:
-    - testing4
-    - testing5
-
-- name: Delete resources from a list
-  k8s:
+- file:
+    path: "{{ virtualenv }}"
     state: absent
-    definition:
-      - kind: Namespace
-        apiVersion: v1
-        metadata:
-          name: testing4
-      - kind: Namespace
-        apiVersion: v1
-        metadata:
-          name: testing5
 
-- name: Resources should not exist
-  assert:
-    that: not ns or ns.status.phase == "Terminating"
-  loop:
-    - testing4
-    - testing5
+# Test validate with kubernetes-validate
+
+- pip:
+    name:
+      - kubernetes-validate==1.12.0
+      - 'openshift>=0.9.0'
+      - coverage
+    virtualenv: "{{ virtualenv }}"
+    virtualenv_command: "{{ virtualenv_command }}"
+    virtualenv_site_packages: no
+
+- include_tasks: validate_installed.yml
   vars:
-    ns: '{{ lookup("k8s", kind="Namespace", api_version="v1", resource_name=item, kubeconfig=kubeconfig.msg) }}'
+    ansible_python_interpreter: "{{ virtualenv_interpreter }}"
+    playbook_namespace: ansible-test-k8s-validate
+
+- file:
+    path: "{{ virtualenv }}"
+    state: absent
+
+# Test graceful failure for older versions of openshift
+
+- pip:
+    name:
+      - openshift==0.6.0
+      - kubernetes==6.0.0
+      - coverage
+    virtualenv: "{{ virtualenv }}"
+    virtualenv_command: "{{ virtualenv_command }}"
+    virtualenv_site_packages: no
+
+- include_tasks: older_openshift_fail.yml
+  vars:
+    ansible_python_interpreter: "{{ virtualenv_interpreter }}"
+    recreate_crd_default_merge_expectation: recreate_crd is failed
+    playbook_namespace: ansible-test-k8s-older-openshift
+
+- file:
+    path: "{{ virtualenv }}"
+    state: absent
+
+# Run full test suite
+
+- pip:
+    name:
+      - 'openshift>=0.9.0'
+      - coverage
+    virtualenv: "{{ virtualenv }}"
+    virtualenv_command: "{{ virtualenv_command }}"
+    virtualenv_site_packages: no
+
+- include_tasks: full_test.yml
+  vars:
+    ansible_python_interpreter: "{{ virtualenv_interpreter }}"
+    create_crd_with_apply: no
+    playbook_namespace: ansible-test-k8s-full
+
+- file:
+    path: "{{ virtualenv }}"
+    state: absent
